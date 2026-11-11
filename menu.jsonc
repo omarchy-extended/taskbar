@@ -1,0 +1,8 @@
+{
+  // The omarchy-extended group, in Setup (every omext addon has it; any one keeps it).
+  "setup.omext": {"icon": "", "label": "Omarchy Extended", "description": "The omarchy-extended addons, on or off", "aliases": ["omext", "extended"]},
+  // The taskbar, on or off.
+  "setup.omext.taskbar": {"icon": "󰖯", "label": "Taskbar", "description": "The windows in a small taskbar at the bottom edge, in place of Omarchy's dock", "action": "if omarchy plugin list --json | jq -e '.[] | select(.id == \"omext.taskbar\") | .enabled' >/dev/null; then omarchy plugin disable omext.taskbar >/dev/null; notify-send Taskbar \"Turned off\"; else omarchy plugin enable omext.taskbar >/dev/null && notify-send Taskbar \"Turned on: in place of Omarchy's dock\"; fi", "checked": "omarchy plugin list --json | jq -e '.[] | select(.id == \"omext.taskbar\") | .enabled' >/dev/null"},
+  // Gather on unplug, on or off (gatherOnUnplug in ~/.config/omext/taskbar.json).
+  "setup.omext.taskbar-gather": {"icon": "󰁄", "label": "Taskbar: Gather on Unplug", "description": "When a screen is unplugged, its windows come onto the workspace in front of you", "action": "if [ \"$(omext-settings toggle taskbar gatherOnUnplug)\" = true ]; then m=\"Turned on\"; else m=\"Turned off\"; fi; notify-send Taskbar \"Gather on unplug: $m\"", "when": "omarchy plugin list --json | jq -e '.[] | select(.id == \"omext.taskbar\") | .enabled' >/dev/null", "checked": "omext-settings get taskbar gatherOnUnplug >/dev/null"}
+}
