@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "omext.taskbar",
   "name": "Taskbar",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "omarchy-extended",
   "license": "MIT",
   "description": "A small auto-hiding taskbar at the bottom edge (omext taskbar): the windows on the workspaces in front of you, a list per other workspace, the minimized ones, and a list per omext dock.",
