@@ -304,11 +304,19 @@ Item {
     onPressed: { for (var w of bars.instances) w.done() }
   }
 
+  // The taskbar's key (hypr/taskbar.lua binds it when one is set): up, with the
+  // keyboard on it, on the screen in front.
+  function byKeyboard() {
+    for (var w of bars.instances) if (w.monitor && w.monitor.focused) { if (w.kbOn) w.done(); else w.kbStart() }
+  }
+  GlobalShortcut { appid: "omext"; name: "taskbar-keys"; description: "The taskbar, by keyboard"; onPressed: root.byKeyboard() }
+
   ShellIpc {
     target: "omext.taskbar"
     function refresh(): void { root.refresh(); root.refreshDocks() }
     // Every window on a workspace out of sight, onto the focused screen's.
     function gather(): void { root.gather(null) }
+    function keys(): void { root.byKeyboard() }
     // Start's menu is open over this screen's taskbar ("" : closed).
     function hold(screen: string): void { root.heldScreen = screen }
     // Up on the screen with the focus, until the pointer has been and gone.

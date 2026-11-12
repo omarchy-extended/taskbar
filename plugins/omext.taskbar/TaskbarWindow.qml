@@ -40,7 +40,7 @@ PanelWindow {
   // (Up too while omext arrange's zone map, opened from here, is open.)
   readonly property bool zoning: !!taskbar && taskbar.zoneScreen !== "" && taskbar.zoneScreen === screen.name
   onZoningChanged: if (!zoning) hideTimer.restart()
-  readonly property bool up: shown && (revealed || openKey !== "" || held || zoning)
+  readonly property bool up: shown && (revealed || openKey !== "" || held || zoning || kbOn)
 
   readonly property int iconSize: Math.round(22 * Style.fontScale)
   readonly property int slot: iconSize + Style.space(12)
@@ -89,7 +89,103 @@ PanelWindow {
     var top = Math.min(p.y, body.y)   // clear of the bar, and of an open list
     return win.taskbar.zoneMenu(c, win.screen.name, win.screen.x + p.x, win.screen.y + win.screen.height - win.height + top)
   }
-  function done() { win.openKey = ""; win.revealed = false; win.tipFor = null }
+  function done() { win.openKey = ""; win.revealed = false; win.tipFor = null; win.kbOn = false; win.kbItem = null; win.kbRowAt = -1 }
+
+  // --- by keyboard ---------------------------------------------------------------
+  // The taskbar's key (if one is set: Setup > Omarchy Extended) brings it up with
+  // the keyboard on it: Left and Right step through what is on the bar, Enter
+  // is a click on the one chosen (a group: its list opens, Up and Down there),
+  // Delete closes the window chosen, Escape leaves (a list first, then the bar).
+  property bool kbOn: false
+  property Item kbItem: null
+  property int kbRowAt: -1            // in an open list: the row chosen
+  function kbStops() {
+    var out = []
+    function walk(item) {
+      for (var i = 0; i < item.children.length; i++) {
+        var c = item.children[i]
+        if (!c.visible) continue
+        if (c.kbStop === true) out.push({ item: c, x: c.mapToItem(row, 0, 0).x })
+        else walk(c)
+      }
+    }
+    walk(row)
+    out.sort((a, b) => a.x - b.x)
+    return out.map(o => o.item)
+  }
+  function kbStart() {
+    if (!win.shown) return
+    win.revealed = true
+    win.kbOn = true
+    win.kbRowAt = -1
+    var stops = kbStops()
+    // On the window in front, if it's on the bar; else the first.
+    win.kbItem = stops.find(i => i.active === true) || stops[0] || null
+    win.tipFor = win.kbItem
+  }
+  function kbMove(d) {
+    if (win.openGroup) {   // in a list
+      var n = list.windows.length
+      if (n) { win.kbRowAt = Math.max(0, Math.min(n - 1, win.kbRowAt + d)); listView.positionViewAtIndex(win.kbRowAt, ListView.Contain) }
+      return
+    }
+    var stops = kbStops()
+    if (!stops.length) return
+    var i = stops.indexOf(win.kbItem)
+    win.kbItem = stops[i < 0 ? 0 : (i + d + stops.length) % stops.length]
+    win.tipFor = win.kbItem
+  }
+  function kbEnter() {
+    if (win.openGroup) {
+      var c = list.windows[win.kbRowAt], bar = win.taskbar, m = win.monitor
+      if (!c) return
+      bar.startAside(); bar.activate(c, m); win.done()
+      return
+    }
+    if (win.kbItem) win.kbItem.kbActivate()
+  }
+  function kbClose() {
+    var c = win.openGroup ? list.windows[win.kbRowAt] : win.kbItem && win.kbItem.client
+    if (c) win.taskbar.closeWindow(c)
+  }
+  function kbEscape() {
+    if (win.openGroup) { win.openKey = ""; win.kbRowAt = -1; win.tipFor = win.kbItem; return }
+    win.done()
+  }
+  // The keys come through a window of their own, there only while the bar is
+  // used by keyboard: Hyprland gives a layer the keyboard as it appears, not
+  // when one already up asks for it.
+  PanelWindow {
+    id: keyWin
+    screen: win.screen
+    visible: win.kbOn
+    anchors { left: true; bottom: true }
+    implicitWidth: 1
+    implicitHeight: 1
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+    mask: Region {}
+    WlrLayershell.namespace: "omext-taskbar-keys"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    onVisibleChanged: if (visible) keys.forceActiveFocus()
+    Item {
+      id: keys
+      focus: true
+      Keys.onPressed: function(e) {
+        if (!win.kbOn) return
+        var list_ = !!win.openGroup
+        if (e.key === Qt.Key_Escape) win.kbEscape()
+        else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space) win.kbEnter()
+        else if (e.key === Qt.Key_Delete) win.kbClose()
+        else if (list_ && e.key === Qt.Key_Down || !list_ && (e.key === Qt.Key_Right || e.key === Qt.Key_Tab)) win.kbMove(1)
+        else if (list_ && e.key === Qt.Key_Up || !list_ && (e.key === Qt.Key_Left || e.key === Qt.Key_Backtab)) win.kbMove(-1)
+        else if (!list_ && e.key === Qt.Key_Up && win.kbItem && win.kbItem.group) win.kbEnter()   // Up on a group: its list
+        else return
+        e.accepted = true
+      }
+    }
+  }
 
   color: "transparent"
   WlrLayershell.namespace: "omext-taskbar"
@@ -109,7 +205,8 @@ PanelWindow {
   }
 
   HyprlandFocusGrab {
-    active: win.openKey !== ""
+    // (Not by keyboard: the grab would take the keys from their window; Escape closes the list then.)
+    active: win.openKey !== "" && !win.kbOn
     windows: [win]
     onCleared: win.done()
   }
@@ -213,6 +310,9 @@ PanelWindow {
       Item {
         id: startButton
         visible: win.startHere
+        readonly property bool kbStop: true
+        readonly property string tipText: "Start"
+        function kbActivate() { win.kbOn = false; win.kbItem = null; win.taskbar.openStart(win.screen.name, body.x, body.height + win.gap + Style.space(12), body.width) }
         // A circle, larger than the rest, standing up out of the bar.
         readonly property int size: win.slot + Style.space(16)
         width: visible ? size + Style.space(4) : 0
@@ -225,10 +325,10 @@ PanelWindow {
           // Centred on the bar: as much out of it above as below (never past
           // the screen's bottom edge).
           y: Math.min((win.slot - height) / 2, body.height + win.gap - row.y - 1 - height)
-          scale: startHit.pressed ? 0.94 : startHit.containsMouse ? 1.05 : 1
+          scale: startHit.pressed ? 0.94 : startHit.containsMouse || win.kbItem === startButton ? 1.05 : 1
           Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
           gradient: Gradient {
-            GradientStop { position: 0; color: Qt.lighter(win.accent, startHit.containsMouse || win.held ? 1.25 : 1.1) }
+            GradientStop { position: 0; color: Qt.lighter(win.accent, startHit.containsMouse || win.held || win.kbItem === startButton ? 1.25 : 1.1) }
             GradientStop { position: 1; color: Qt.darker(win.accent, 1.25) }
           }
           border.color: Commons.Util.alpha(Commons.Color.popups.background, 0.9)
@@ -340,12 +440,16 @@ PanelWindow {
         id: gatherButton
         visible: win.others.length > 0
         readonly property string tipText: "Bring them all here"
+        readonly property bool kbStop: true
+        function kbActivate() { win.taskbar.startAside(); win.taskbar.gather(win.monitor); win.done() }
         width: win.slot
         height: win.slot
         Rectangle {
           x: 2; y: 2; width: parent.width - 4; height: parent.height - 4
           radius: Style.space(9)
-          color: gatherHit.containsMouse ? Commons.Util.alpha(win.text, 0.12) : "transparent"
+          color: gatherHit.containsMouse || win.kbItem === gatherButton ? Commons.Util.alpha(win.text, 0.12) : "transparent"
+          border.width: win.kbItem === gatherButton ? 1 : 0
+          border.color: win.accent
           Behavior on color { ColorAnimation { duration: 120 } }
         }
         Text {
@@ -441,6 +545,7 @@ PanelWindow {
     }
 
     ListView {
+      id: listView
       x: Style.space(6); y: header.y + header.height
       width: parent.width - Style.space(12)
       height: parent.height - y - Style.space(6)
@@ -450,10 +555,11 @@ PanelWindow {
       delegate: Rectangle {
         id: entry
         required property var modelData
+        required property int index
         width: ListView.view.width
         height: list.rowHeight
         radius: Style.space(7)
-        color: entryHit.containsMouse ? Commons.Util.alpha(win.text, 0.1) : "transparent"
+        color: win.kbOn && index === win.kbRowAt ? Commons.Util.alpha(win.accent, 0.22) : entryHit.containsMouse ? Commons.Util.alpha(win.text, 0.1) : "transparent"
         AppIcon {
           id: entryIcon
           x: Style.space(6); anchors.verticalCenter: parent.verticalCenter
@@ -555,6 +661,9 @@ PanelWindow {
     property int leftRoom: 0
     readonly property bool active: !!client && client.address === win.taskbar.activeAddress && !minimized
     readonly property string tipText: client ? win.taskbar.labelOf(client) + (minimized ? "  ·  minimized" : "") : ""
+    readonly property bool kbStop: true
+    readonly property bool kbChosen: win.kbItem === ti
+    function kbActivate() { var c = ti.client, bar = win.taskbar, m = win.monitor; bar.startAside(); win.done(); bar.activate(c, m) }
     width: win.slot + leftRoom
     height: win.slot
 
@@ -562,7 +671,9 @@ PanelWindow {
       x: ti.leftRoom + 2; y: 2
       width: win.slot - 4; height: win.slot - 4
       radius: Style.space(9)
-      color: hit.containsMouse ? Commons.Util.alpha(win.text, 0.12) : ti.active ? Commons.Util.alpha(win.accent, 0.2) : "transparent"
+      color: hit.containsMouse || ti.kbChosen ? Commons.Util.alpha(win.text, 0.12) : ti.active ? Commons.Util.alpha(win.accent, 0.2) : "transparent"
+      border.width: ti.kbChosen ? 1 : 0
+      border.color: win.accent
       Behavior on color { ColorAnimation { duration: 120 } }
     }
     AppIcon {
@@ -610,6 +721,9 @@ PanelWindow {
     property bool compact: false  // just the label, as an icon, and the count in the corner (a dock)
     readonly property bool open: !!group && win.openKey === group.key
     readonly property string tipText: group ? group.title + "  ·  " + group.windows.length + (group.windows.length === 1 ? " window" : " windows") : ""
+    readonly property bool kbStop: true
+    readonly property bool kbChosen: win.kbItem === gb
+    function kbActivate() { win.toggleGroup(gb.group.key, gb); win.kbRowAt = 0 }
     width: gb.compact ? win.slot + Style.space(6) : inner.implicitWidth + Style.space(gb.corner ? 18 : 14)
     height: win.slot
 
@@ -617,7 +731,7 @@ PanelWindow {
       x: 2; y: 2; width: parent.width - 4; height: parent.height - 4
       radius: Style.space(9)
       color: gb.open ? Commons.Util.alpha(win.accent, 0.3) : gbHit.containsMouse ? Commons.Util.alpha(win.text, 0.12) : Commons.Util.alpha(win.text, 0.05)
-      border.color: Commons.Util.alpha(win.text, gb.open ? 0 : 0.08)
+      border.color: gb.kbChosen ? win.accent : Commons.Util.alpha(win.text, gb.open ? 0 : 0.08)
       Behavior on color { ColorAnimation { duration: 120 } }
     }
     Text {  // compact: the label as an icon

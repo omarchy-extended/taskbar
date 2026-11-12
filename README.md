@@ -50,6 +50,26 @@ workspaces out of sight. It's `gatherOnUnplug` in `~/.config/omext/taskbar.json`
 
 ![Start's menu, opened from the round button, centred above the taskbar](screenshots/taskbar-start.webp)
 
+## By keyboard
+
+The taskbar has a key of its own if you set one (none by default): Omarchy menu
+› Setup › Omarchy Extended › Taskbar: Keyboard Key turns on Super + Ctrl + J, or
+set any other:
+
+```bash
+omext-settings set taskbar key '"SUPER + ALT + T"'
+```
+
+The key brings the taskbar up with the keyboard on it, and takes it down again.
+
+| Key | Does |
+| --- | --- |
+| Left / Right (Tab / Shift + Tab) | The next thing on the bar; its name shows over it |
+| Enter | A click on it: go to the window, open a group's list, Start, bring all here |
+| Up / Down | In a group's open list |
+| Delete | Close the window chosen |
+| Esc | Leave a list, then the taskbar |
+
 ## From a script
 
 ```bash

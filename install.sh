@@ -32,6 +32,19 @@ elif [[ -d $core/.git && $(readlink -f "$plugins/omext.core") == "$core"/* ]]; t
   git -C "$core" pull -q --ff-only 2>/dev/null || info "couldn't update omext core (run: git -C $core pull)"
 fi
 
+# Hyprland: the taskbar's key, if one is set (hypr/*.lua, by folder, each time
+# Hyprland reads its config).
+hypr_conf=$HOME/.config/hypr/hyprland.lua
+if [[ -f $hypr_conf ]]; then
+  sed -i "/^-- BEGIN $mark\$/,/^-- END $mark\$/d" "$hypr_conf"
+  {
+    echo "-- BEGIN $mark"
+    echo "for f in io.popen('ls \"$dir\"/hypr/*.lua 2>/dev/null'):lines() do pcall(dofile, f) end"
+    echo "-- END $mark"
+  } >> "$hypr_conf"
+  hyprctl reload >/dev/null 2>&1 || true
+fi
+
 # The Omarchy menu: a Taskbar entry (on or off), before the file's last brace.
 mkdir -p "$(dirname "$menu_conf")"
 [[ -s $menu_conf ]] || printf '{\n}\n' > "$menu_conf"
