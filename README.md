@@ -50,6 +50,16 @@ workspaces out of sight. It's `gatherOnUnplug` in `~/.config/omext/taskbar.json`
 
 ![Start's menu, opened from the round button, centred above the taskbar](screenshots/taskbar-start.webp)
 
+## One icon per app
+
+An app's windows in front of you share one icon, with how many in its corner.
+A click on it lists them (a click on one goes there); with one window, the
+click goes straight to it. To have an icon per window as before:
+
+```bash
+omext-settings set taskbar group false
+```
+
 ## Pinned apps
 
 Apps you pin keep an icon at the left of the taskbar, running or not, in the

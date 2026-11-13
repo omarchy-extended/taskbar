@@ -35,6 +35,20 @@ PanelWindow {
   // aren't a pinned app's: those have their place after the pins.
   readonly property var pinned: taskbar ? taskbar.pinned : []
   readonly property var currentRest: taskbar ? current.filter(c => !taskbar.isPinnedKey(taskbar.pinKeyOf(c))) : current
+  // One icon per app: an app's windows in front share its icon, and a click on
+  // it lists them ("group": false in ~/.config/omext/taskbar.json: an icon each).
+  readonly property bool grouping: !taskbar || taskbar.config.group !== false
+  function stacksOf(windows) {   // [{key, title, windows}], in the windows' order
+    var by = {}, out = []
+    for (var c of windows) {
+      var k = win.grouping ? win.taskbar.pinKeyOf(c) : c.address
+      if (!by[k]) { by[k] = { key: "app:" + k, title: win.taskbar.appName(c), windows: [] }; out.push(by[k]) }
+      by[k].windows.push(c)
+    }
+    return out
+  }
+  readonly property var restStacks: taskbar ? stacksOf(currentRest) : []
+  readonly property var pinStacks: taskbar ? stacksOf(current.filter(c => taskbar.isPinnedKey(taskbar.pinKeyOf(c)))) : []
   readonly property bool anything: startHere || pinned.length + current.length + others.length + minimized.length + dockGroups.length > 0
 
   readonly property bool shown: !!taskbar && anything && !fullscreen
@@ -65,6 +79,7 @@ PanelWindow {
   }
 
   readonly property var openGroup: {
+    for (var a of win.restStacks.concat(win.pinStacks)) if (a.key === win.openKey && a.windows.length > 1) return a
     for (var g of win.others) if (g.key === win.openKey) return g
     for (var d of win.dockGroups) if (d.key === win.openKey) return d
     return null
@@ -371,10 +386,10 @@ PanelWindow {
           required property var modelData
           readonly property var here: win.current.filter(c => win.taskbar.pinKeyOf(c) === modelData.key)
           Repeater {
-            model: pinSlot.here
+            model: win.stacksOf(pinSlot.here)
             TaskIcon {
               required property var modelData
-              client: modelData
+              stack: modelData
             }
           }
           PinIcon {
@@ -387,12 +402,12 @@ PanelWindow {
 
       // The workspaces in front of you: a little room between one and the next.
       Repeater {
-        model: win.currentRest
+        model: win.restStacks
         TaskIcon {
           required property var modelData
           required property int index
-          client: modelData
-          leftRoom: index > 0 && win.currentRest[index - 1].workspace.id !== modelData.workspace.id ? Style.space(8) : 0
+          stack: modelData
+          leftRoom: index > 0 && win.restStacks[index - 1].windows[0].workspace.id !== modelData.windows[0].workspace.id ? Style.space(8) : 0
         }
       }
 
@@ -800,14 +815,24 @@ PanelWindow {
   // A window: click to go to it (the focused one: minimize it), middle-click to close it.
   component TaskIcon: Item {
     id: ti
-    property var client: null
+    // One window, or an app's windows together (stack: {key, title, windows}):
+    // with more than one, a click lists them.
+    property var stack: null
+    readonly property bool many: !!stack && stack.windows.length > 1
+    readonly property var group: many ? stack : null   // (a list to open: see openByKey and the keys)
+    property var client: !stack ? null : stack.windows.find(c => c.address === win.taskbar.activeAddress) || stack.windows[0] || null
     property bool minimized: false
     property int leftRoom: 0
-    readonly property bool active: !!client && client.address === win.taskbar.activeAddress && !minimized
-    readonly property string tipText: client ? win.taskbar.labelOf(client) + (minimized ? "  ·  minimized" : "") : ""
+    readonly property bool active: !minimized && (many ? stack.windows.some(c => c.address === win.taskbar.activeAddress)
+                                                       : !!client && client.address === win.taskbar.activeAddress)
+    readonly property string tipText: many ? stack.title + "  ·  " + stack.windows.length + " windows"
+                                           : client ? win.taskbar.labelOf(client) + (minimized ? "  ·  minimized" : "") : ""
     readonly property bool kbStop: true
     readonly property bool kbChosen: win.kbItem === ti
-    function kbActivate() { var c = ti.client, bar = win.taskbar, m = win.monitor; bar.startAside(); win.done(); bar.activate(c, m) }
+    function kbActivate() {
+      if (ti.many) { win.toggleGroup(ti.stack.key, ti); win.kbRowAt = 0; return }
+      var c = ti.client, bar = win.taskbar, m = win.monitor; bar.startAside(); win.done(); bar.activate(c, m)
+    }
     width: win.slot + leftRoom
     height: win.slot
 
@@ -838,6 +863,22 @@ PanelWindow {
       opacity: ti.active ? 1 : 0.45
       Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
     }
+    Rectangle {  // several windows: how many
+      visible: ti.many
+      x: ti.leftRoom + win.slot - width - 1; y: 1
+      width: Math.max(height, stackCount.implicitWidth + Style.space(6)); height: Math.round(13 * Style.fontScale); radius: height / 2
+      color: Commons.Color.popups.background
+      border.color: Commons.Util.alpha(win.accent, 0.6)
+      Text {
+        id: stackCount
+        anchors.centerIn: parent
+        text: ti.stack ? String(ti.stack.windows.length) : ""
+        color: win.text
+        font.family: Style.font.family
+        font.pixelSize: Math.round(Style.font.caption * 0.85)
+        font.bold: true
+      }
+    }
     MouseArea {
       id: hit
       x: ti.leftRoom; width: win.slot; height: win.slot
@@ -847,6 +888,12 @@ PanelWindow {
       onContainsMouseChanged: if (containsMouse) win.tipFor = ti; else if (win.tipFor === ti) win.tipFor = null
       onClicked: function(mouse) {
         win.taskbar.startAside()
+        if (ti.many) {  // its windows in a list; a right click: pin or unpin the app
+          win.tipFor = null
+          if (mouse.button === Qt.LeftButton) win.toggleGroup(ti.stack.key, ti)
+          else if (mouse.button === Qt.RightButton) win.pinMenuAt(ti, win.taskbar.pinKeyOf(ti.client))
+          return
+        }
         if (mouse.button === Qt.MiddleButton) { win.taskbar.closeWindow(ti.client); return }
         if (mouse.button === Qt.RightButton) {  // the zone map (with its Pin line), or with no zones: the pin menu
           win.tipFor = null
