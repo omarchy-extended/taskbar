@@ -26,7 +26,15 @@ PanelWindow {
 
   readonly property var current: taskbar ? taskbar.current : []
   readonly property var others: taskbar ? taskbar.others : []
-  readonly property var minimized: taskbar ? taskbar.minimized : []
+  // The minimized windows with a place of their own: not a pinned app's (those
+  // stay at the pin, which shows it), nor, with one icon per app, those of an
+  // app that has an icon in front (its list has them).
+  readonly property var minimized: {
+    if (!taskbar) return []
+    var front = {}
+    if (grouping) for (var c of taskbar.current) front[taskbar.pinKeyOf(c)] = true
+    return taskbar.minimized.filter(c => !taskbar.isPinnedKey(taskbar.pinKeyOf(c)) && !front[taskbar.pinKeyOf(c)])
+  }
   readonly property var dockGroups: taskbar ? taskbar.dockGroups : []
   readonly property bool startHere: !!taskbar && taskbar.startHere
   readonly property bool held: !!taskbar && !!screen && taskbar.heldScreen === screen.name
@@ -784,7 +792,9 @@ PanelWindow {
     readonly property var own: pin ? pin.windows.filter(c => !win.taskbar.docked[c.address]) : []
     readonly property bool many: own.length > 1
     readonly property var group: many ? { key: "pin:" + pin.key, title: pin.name, windows: own } : null
-    readonly property string tipText: pin ? pin.name + (many ? "  ·  " + own.length + " windows" : running ? "" : "  ·  not running") : ""
+    // Every window it has is minimized: the icon says so.
+    readonly property bool minimized: own.length > 0 && own.every(c => c.workspace && c.workspace.name === "special:minimized")
+    readonly property string tipText: pin ? pin.name + (many ? "  ·  " + own.length + " windows" : "") + (minimized ? "  ·  minimized" : running ? "" : "  ·  not running") : ""
     readonly property bool kbStop: true
     readonly property bool kbChosen: win.kbItem === pi
     function kbActivate() {
@@ -812,8 +822,16 @@ PanelWindow {
       scale: pinHit.pressed ? 0.9 : pinHit.containsMouse ? 1.12 : 1
       Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
     }
+    Rectangle {  // minimized: a small "–" in the corner, as on a window's own button
+      visible: pi.minimized
+      x: win.slot - width - 1; y: win.slot - height - 1
+      width: Math.round(13 * Style.fontScale); height: width; radius: height / 2
+      color: Commons.Color.popups.background
+      border.color: Commons.Util.alpha(win.text, 0.35)
+      Rectangle { anchors.centerIn: parent; width: parent.width * 0.5; height: Math.max(1.5, parent.height * 0.14); radius: height / 2; color: win.text }
+    }
     Rectangle {  // running somewhere else: a small mark
-      visible: pi.running
+      visible: pi.running && !pi.minimized
       width: Style.space(4); height: 3; radius: 1.5
       x: (win.slot - width) / 2
       y: win.slot - 4
