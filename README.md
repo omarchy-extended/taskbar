@@ -52,9 +52,12 @@ workspaces out of sight. It's `gatherOnUnplug` in `~/.config/omext/taskbar.json`
 
 ## One icon per app
 
-An app's windows in front of you share one icon, with how many in its corner.
-A click on it lists them (a click on one goes there); with one window, the
-click goes straight to it. To have an icon per window as before:
+An app's windows share one icon, with how many in its corner: the ones in front
+of you, and its windows on other workspaces and minimized ones too (not the
+ones in a dock). A click on it lists them, each with where it is when it isn't
+in front; a click on one goes there. With one window, the click goes straight
+to it. A pinned app's icon does the same when the app has several windows
+elsewhere. To have an icon per window as before:
 
 ```bash
 omext-settings set taskbar group false

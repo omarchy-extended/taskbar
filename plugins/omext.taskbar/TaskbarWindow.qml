@@ -38,12 +38,19 @@ PanelWindow {
   // One icon per app: an app's windows in front share its icon, and a click on
   // it lists them ("group": false in ~/.config/omext/taskbar.json: an icon each).
   readonly property bool grouping: !taskbar || taskbar.config.group !== false
+  // An app's icon stands for all its windows outside the docks: the ones in
+  // front first, then those on other workspaces and the minimized ones.
   function stacksOf(windows) {   // [{key, title, windows}], in the windows' order
     var by = {}, out = []
     for (var c of windows) {
       var k = win.grouping ? win.taskbar.pinKeyOf(c) : c.address
-      if (!by[k]) { by[k] = { key: "app:" + k, title: win.taskbar.appName(c), windows: [] }; out.push(by[k]) }
+      if (!by[k]) { by[k] = { key: "app:" + k, app: k, title: win.taskbar.appName(c), windows: [] }; out.push(by[k]) }
       by[k].windows.push(c)
+    }
+    if (win.grouping) for (var st of out) {
+      var here = st.windows.map(c => c.address)
+      st.windows = st.windows.concat(win.taskbar.clients.filter(c => win.taskbar.windowOk(c) && !win.taskbar.docked[c.address]
+                                                                     && here.indexOf(c.address) < 0 && win.taskbar.pinKeyOf(c) === st.app))
     }
     return out
   }
@@ -80,6 +87,11 @@ PanelWindow {
 
   readonly property var openGroup: {
     for (var a of win.restStacks.concat(win.pinStacks)) if (a.key === win.openKey && a.windows.length > 1) return a
+    // (A pinned app with none in front: its windows elsewhere, minimized ones too.)
+    for (var p of win.pinned) if ("pin:" + p.key === win.openKey) {
+      var own = p.windows.filter(c => !win.taskbar.docked[c.address])
+      if (own.length > 1) return { key: win.openKey, app: p.key, title: p.name, windows: own }
+    }
     for (var g of win.others) if (g.key === win.openKey) return g
     for (var d of win.dockGroups) if (d.key === win.openKey) return d
     return null
@@ -686,7 +698,11 @@ PanelWindow {
           }
           Text {
             width: parent.width - entryApp.width - parent.spacing
-            text: entry.c ? win.taskbar.detailOf(entry.c) : "not open"
+            // (In an app's list, a window that isn't in front: where it is.)
+            readonly property string where: !entry.c || !entry.c.workspace || win.openGroup && !win.openGroup.app ? ""
+                                          : entry.c.workspace.name === "special:minimized" ? "minimized"
+                                          : entry.c.workspace.id > 0 && !win.taskbar.shownWorkspaces[entry.c.workspace.id] ? "workspace " + entry.c.workspace.name : ""
+            text: entry.c ? [where, win.taskbar.detailOf(entry.c)].filter(t => t).join("  ·  ") : "not open"
             textFormat: Text.PlainText
             elide: Text.ElideRight
             color: Commons.Util.alpha(win.text, 0.6)
@@ -764,10 +780,17 @@ PanelWindow {
     id: pi
     property var pin: null
     readonly property bool running: !!pin && pin.windows.length > 0
-    readonly property string tipText: pin ? pin.name + (running ? "" : "  ·  not running") : ""
+    // Its windows outside the docks: with more than one, a click lists them.
+    readonly property var own: pin ? pin.windows.filter(c => !win.taskbar.docked[c.address]) : []
+    readonly property bool many: own.length > 1
+    readonly property var group: many ? { key: "pin:" + pin.key, title: pin.name, windows: own } : null
+    readonly property string tipText: pin ? pin.name + (many ? "  ·  " + own.length + " windows" : running ? "" : "  ·  not running") : ""
     readonly property bool kbStop: true
     readonly property bool kbChosen: win.kbItem === pi
-    function kbActivate() { var p = pi.pin, bar = win.taskbar, m = win.monitor; bar.startAside(); win.done(); bar.openPin(p, m) }
+    function kbActivate() {
+      if (pi.many) { win.toggleGroup(pi.group.key, pi); win.kbRowAt = 0; return }
+      var p = pi.pin, bar = win.taskbar, m = win.monitor; bar.startAside(); win.done(); bar.openPin(p, m)
+    }
     width: win.slot
     height: win.slot
 
@@ -796,6 +819,21 @@ PanelWindow {
       y: win.slot - 4
       color: win.accent
       opacity: 0.45
+    }
+    Rectangle {  // several windows: how many
+      visible: pi.many
+      x: win.slot - width - 1; y: 1
+      width: Math.max(height, pinCount.implicitWidth + Style.space(6)); height: Math.round(13 * Style.fontScale); radius: height / 2
+      color: Commons.Color.popups.background
+      border.color: Commons.Util.alpha(win.accent, 0.6)
+      Text {
+        id: pinCount
+        anchors.centerIn: parent
+        text: String(pi.own.length)
+        color: win.text
+        font.family: Style.font.family
+        font.pixelSize: Math.round(Style.font.caption * 0.85)
+      }
     }
     MouseArea {
       id: pinHit
