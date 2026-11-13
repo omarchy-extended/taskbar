@@ -53,9 +53,15 @@ workspaces out of sight. It's `gatherOnUnplug` in `~/.config/omext/taskbar.json`
 ## Pinned apps
 
 Apps you pin keep an icon at the left of the taskbar, running or not, in the
-order you pinned them. A click on one goes to its window (wherever it is: another
-workspace, minimized, in a dock), or starts the app. While it has a window in
-front of you, that window's icon stands in its place.
+order you pinned them. A click on one goes to its window (on another workspace,
+or minimized), or starts the app. While it has a window in front of you, that
+window's icon stands in its place.
+
+The taskbar's apps are windows; the [omext docks](https://github.com/omarchy-extended/docks)'
+are the docks'. A pinned app that a dock has too starts as a window of its own,
+outside the dock. Only when it is already open in a dock, and is an app that
+runs once, does the click go there. Each dock's button on the taskbar lists
+every app the dock has, open or not: a click opens it in its dock.
 
 - **Pin or unpin:** right-click a window's icon. With
   [omext arrange](https://github.com/omarchy-extended/arrange) the zone map that

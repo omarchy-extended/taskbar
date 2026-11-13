@@ -129,7 +129,7 @@ PanelWindow {
   }
   function kbMove(d) {
     if (win.openGroup) {   // in a list
-      var n = list.windows.length
+      var n = list.rows.length
       if (n) { win.kbRowAt = Math.max(0, Math.min(n - 1, win.kbRowAt + d)); listView.positionViewAtIndex(win.kbRowAt, ListView.Contain) }
       return
     }
@@ -141,15 +141,16 @@ PanelWindow {
   }
   function kbEnter() {
     if (win.openGroup) {
-      var c = list.windows[win.kbRowAt], bar = win.taskbar, m = win.monitor
-      if (!c) return
-      bar.startAside(); bar.activate(c, m); win.done()
+      var row = list.rows[win.kbRowAt], bar = win.taskbar, m = win.monitor
+      if (!row) return
+      bar.startAside(); win.done()
+      if (row.client) bar.activate(row.client, m); else bar.openDockApp(row, m)
       return
     }
     if (win.kbItem) win.kbItem.kbActivate()
   }
   function kbClose() {
-    var c = win.openGroup ? list.windows[win.kbRowAt] : win.kbItem && win.kbItem.client
+    var c = win.openGroup ? (list.rows[win.kbRowAt] || {}).client : win.kbItem && win.kbItem.client
     if (c) win.taskbar.closeWindow(c)
   }
   function kbEscape() {
@@ -602,8 +603,10 @@ PanelWindow {
     visible: win.up && win.openGroup !== null
     readonly property int rowHeight: Math.round(30 * Style.fontScale)
     readonly property var windows: win.openGroup ? win.openGroup.windows : []
+    // Its rows: a workspace's windows; a dock's apps, every one, open or not.
+    readonly property var rows: !win.openGroup ? [] : win.openGroup.apps ? win.openGroup.apps : win.openGroup.windows.map(c => ({ client: c }))
     width: Style.space(340)
-    height: header.height + Math.min(windows.length * rowHeight, win.height - body.height - win.gap * 3 - header.height - Style.space(20)) + Style.space(14)
+    height: header.height + Math.min(rows.length * rowHeight, win.height - body.height - win.gap * 3 - header.height - Style.space(20)) + Style.space(14)
     radius: Style.space(12)
     color: Commons.Util.alpha(Commons.Color.popups.background, 0.96)
     border.color: Commons.Util.alpha(win.text, 0.14)
@@ -631,11 +634,12 @@ PanelWindow {
       height: parent.height - y - Style.space(6)
       clip: true
       boundsBehavior: Flickable.StopAtBounds
-      model: list.windows
+      model: list.rows
       delegate: Rectangle {
         id: entry
         required property var modelData
         required property int index
+        readonly property var c: modelData.client || null   // its window (none: a dock's app that isn't open)
         width: ListView.view.width
         height: list.rowHeight
         radius: Style.space(7)
@@ -644,7 +648,10 @@ PanelWindow {
           id: entryIcon
           x: Style.space(6); anchors.verticalCenter: parent.verticalCenter
           size: Math.round(18 * Style.fontScale)
-          client: entry.modelData
+          client: entry.c
+          iconName: entry.c ? "" : (entry.modelData.icon || "")
+          letter: entry.modelData.name || ""
+          opacity: entry.c ? 1 : 0.5
         }
         Row {  // the app's name, then what its window shows
           anchors.verticalCenter: parent.verticalCenter
@@ -654,7 +661,7 @@ PanelWindow {
           Text {
             id: entryApp
             width: Math.min(implicitWidth, parent.width * 0.6)
-            text: win.taskbar.appName(entry.modelData)
+            text: entry.c ? win.taskbar.appName(entry.c) : (entry.modelData.name || "")
             textFormat: Text.PlainText
             elide: Text.ElideRight
             color: win.text
@@ -664,7 +671,7 @@ PanelWindow {
           }
           Text {
             width: parent.width - entryApp.width - parent.spacing
-            text: win.taskbar.detailOf(entry.modelData)
+            text: entry.c ? win.taskbar.detailOf(entry.c) : "not open"
             textFormat: Text.PlainText
             elide: Text.ElideRight
             color: Commons.Util.alpha(win.text, 0.6)
@@ -680,8 +687,9 @@ PanelWindow {
           acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
           // Everything taken first: closing the list takes this row away with it.
           onClicked: function(mouse) {
-            var c = entry.modelData, bar = win.taskbar, m = win.monitor
+            var c = entry.c, row = entry.modelData, bar = win.taskbar, m = win.monitor
             bar.startAside()
+            if (!c) { if (mouse.button === Qt.LeftButton) { win.done(); bar.openDockApp(row, m) } return }
             if (mouse.button === Qt.MiddleButton) { bar.closeWindow(c); return }
             if (mouse.button === Qt.RightButton) { if (win.zoneMenuAt(c, entry)) win.done(); return }
             bar.activate(c, m)
@@ -691,10 +699,10 @@ PanelWindow {
         Rectangle {  // ✕ closes it
           anchors { right: parent.right; rightMargin: Style.space(5); verticalCenter: parent.verticalCenter }
           width: Style.space(20); height: width; radius: width / 2
-          visible: entryHit.containsMouse || xHit.containsMouse
+          visible: !!entry.c && (entryHit.containsMouse || xHit.containsMouse)
           color: xHit.containsMouse ? Commons.Util.alpha(Commons.Color.urgent, 0.4) : Commons.Util.alpha(win.text, 0.1)
           Text { anchors.centerIn: parent; text: "✕"; color: win.text; font.pixelSize: Style.space(9) }
-          MouseArea { id: xHit; anchors.fill: parent; hoverEnabled: true; onClicked: win.taskbar.closeWindow(entry.modelData) }
+          MouseArea { id: xHit; anchors.fill: parent; hoverEnabled: true; onClicked: win.taskbar.closeWindow(entry.c) }
         }
       }
     }
@@ -860,7 +868,8 @@ PanelWindow {
     property bool corner: false   // the label small in the corner (a workspace's number)
     property bool compact: false  // just the label, as an icon, and the count in the corner (a dock)
     readonly property bool open: !!group && win.openKey === group.key
-    readonly property string tipText: group ? group.title + "  ·  " + group.windows.length + (group.windows.length === 1 ? " window" : " windows") : ""
+    readonly property string tipText: !group ? "" : group.apps ? group.title + "  ·  " + group.windows.length + " of " + group.apps.length + " open"
+                                                    : group.title + "  ·  " + group.windows.length + (group.windows.length === 1 ? " window" : " windows")
     readonly property bool kbStop: true
     readonly property bool kbChosen: win.kbItem === gb
     function kbActivate() { win.toggleGroup(gb.group.key, gb); win.kbRowAt = 0 }

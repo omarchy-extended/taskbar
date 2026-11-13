@@ -45,7 +45,7 @@ Item {
     var out = {}
     for (var d of root.docks)
       for (var a of (d.apps || []))
-        if (a.address) out[a.address] = { dock: d.id, app: a.id, icon: a.icon || "", name: a.name || "", edge: d.edge }
+        if (a.address) out[a.address] = { dock: d.id, app: a.id, icon: a.icon || "", name: a.name || "", edge: d.edge, multi: !!a.multi }
     return out
   }
 
@@ -94,9 +94,13 @@ Item {
     var out = []
     for (var d of root.docks) {
       var windows = root.clients.filter(c => root.windowOk(c) && root.docked[c.address] && root.docked[c.address].dock === d.id)
-      if (windows.length === 0) continue
+      // Every app the dock has, as the dock's own bar shows them: open or not.
+      var apps = (d.apps || []).filter(a => !a.separator).map(a => ({
+        dock: d.id, app: a.id, name: a.name || a.id, icon: a.icon || "", running: !!a.running,
+        client: a.address ? windows.find(c => c.address === a.address) || null : null }))
+      if (apps.length === 0) continue
       var side = d.edge === "left" ? "Left" : d.edge === "right" ? "Right" : String(d.edge || "")
-      out.push({ key: "dock:" + d.id, edge: d.edge, title: side + " dock" + (root.manyScreens && d.screen ? " · " + d.screen : ""), windows: windows })
+      out.push({ key: "dock:" + d.id, edge: d.edge, title: side + " dock" + (root.manyScreens && d.screen ? " · " + d.screen : ""), windows: windows, apps: apps })
     }
     return out
   }
@@ -193,13 +197,26 @@ Item {
     return { key: k, entry: e || null, name: e ? e.name : k, icon: e && e.icon ? e.icon : String(k).toLowerCase(),
              windows: root.clients.filter(c => root.windowOk(c) && root.pinKeyOf(c) === k) }
   })
-  // A pin clicked: to its window if it has one (the first), else the app starts.
+  // A pin clicked: the taskbar's apps are windows, the docks' are the docks'.
+  // To its window if it has one outside the docks; else, when it is open in a
+  // dock and is an app that runs once, to that (its dock opens); else it
+  // starts, as a window of its own (outside the docks, also when a dock has
+  // the app: omext-dock float sees to that).
   function openPin(pin, screenMonitor) {
-    if (pin.windows.length) { root.activate(pin.windows[0], screenMonitor); return }
+    var own = pin.windows.filter(c => !root.docked[c.address])
+    if (own.length) { root.activate(own[0], screenMonitor); return }
+    var inDock = pin.windows.find(c => root.docked[c.address] && !root.docked[c.address].multi)
+    if (inDock) { root.activate(inDock, screenMonitor); return }
     var e = pin.entry
     if (!e) return
     if (e.runInTerminal) Quickshell.execDetached(["omarchy-launch-tui"].concat((e.command || []).filter(w => !/^%[a-zA-Z]$/.test(String(w)))))
-    else Quickshell.execDetached(["uwsm-app", "--", "gtk-launch", String(e.id) + ".desktop"])
+    else Quickshell.execDetached(["bash", "-c", '[ -x "$0" ] && "$0" float "$1.desktop" 2>/dev/null || uwsm-app -- gtk-launch "$1.desktop"', root.dockTool, String(e.id)])
+    refreshSoon.restart()
+  }
+  // A dock's app from its list here: open, its dock opens on it; else it starts there.
+  function openDockApp(row, screenMonitor) {
+    if (row.client) { root.activate(row.client, screenMonitor); return }
+    Quickshell.execDetached(["bash", "-c", '"$0" expand "$1" "$2" on; omarchy-shell -q omext.docks open "$1"', root.dockTool, row.dock, row.app])
     refreshSoon.restart()
   }
 
