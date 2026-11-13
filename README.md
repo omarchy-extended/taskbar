@@ -50,6 +50,19 @@ workspaces out of sight. It's `gatherOnUnplug` in `~/.config/omext/taskbar.json`
 
 ![Start's menu, opened from the round button, centred above the taskbar](screenshots/taskbar-start.webp)
 
+## Pinned apps
+
+Apps you pin keep an icon at the left of the taskbar, running or not, in the
+order you pinned them. A click on one goes to its window (wherever it is: another
+workspace, minimized, in a dock), or starts the app. While it has a window in
+front of you, that window's icon stands in its place.
+
+- **Pin or unpin:** right-click a window's icon. With
+  [omext arrange](https://github.com/omarchy-extended/arrange) the zone map that
+  opens has a "Pin to taskbar" line; without it, a small menu shows.
+- **Unpin an app that isn't running:** right-click its icon.
+- The list is `pins` in `~/.config/omext/taskbar.json` (desktop entry ids).
+
 ## By keyboard
 
 The taskbar has a key of its own if you set one (none by default): Omarchy menu

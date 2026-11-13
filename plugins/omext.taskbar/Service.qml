@@ -131,6 +131,9 @@ Item {
   function iconOf(c) {
     var d = root.docked[c.address]
     if (d && d.icon) return root.iconSource(d.icon)
+    // A browser profile's own icon (omext core), so its windows tell apart.
+    var p = coreApps.item && coreApps.item.profileIconOf ? coreApps.item.profileIconOf(c) : ""
+    if (p) return root.iconSource(p)
     var e = root.entryOf(c)
     return root.iconSource(e && e.icon ? e.icon : String(c.class || "").toLowerCase())
   }
@@ -162,6 +165,44 @@ Item {
   // A click: the window, focused and on top (its workspace comes with it). The
   // focused one goes down to the minimized instead, as on a taskbar. A
   // minimized one comes back onto the workspace in front of you first.
+  // --- pinned apps ---------------------------------------------------------------
+  // Apps that keep an icon on the taskbar, running or not ("pins" in
+  // ~/.config/omext/taskbar.json: desktop entry ids, in their order). A right
+  // click on a window's icon pins or unpins its app.
+  readonly property var pins: Array.isArray(config.pins) ? config.pins : []
+  function pinKeyOf(c) {
+    var e = c ? root.entryOf(c) : null
+    return e && e.id ? String(e.id) : String(c && c.class || "")
+  }
+  function isPinnedKey(k) { return root.pins.indexOf(k) >= 0 }
+  function togglePinKey(k) {
+    if (!k || !coreOwn.item) return
+    var p = root.pins.slice(), i = p.indexOf(k)
+    if (i >= 0) p.splice(i, 1); else p.push(k)
+    coreOwn.item.set({ pins: p })
+  }
+  function togglePin(address) {
+    var a = String(address).indexOf("0x") === 0 ? String(address) : "0x" + address
+    var c = root.clients.find(x => x.address === a)
+    if (c) root.togglePinKey(root.pinKeyOf(c))
+  }
+  // [{key, entry, name, icon, windows}]: each pin, with its app's windows
+  // wherever they are (another workspace, minimized, in a dock).
+  readonly property var pinned: root.pins.map(function(k) {
+    var e = DesktopEntries.byId(k) || DesktopEntries.heuristicLookup(k)
+    return { key: k, entry: e || null, name: e ? e.name : k, icon: e && e.icon ? e.icon : String(k).toLowerCase(),
+             windows: root.clients.filter(c => root.windowOk(c) && root.pinKeyOf(c) === k) }
+  })
+  // A pin clicked: to its window if it has one (the first), else the app starts.
+  function openPin(pin, screenMonitor) {
+    if (pin.windows.length) { root.activate(pin.windows[0], screenMonitor); return }
+    var e = pin.entry
+    if (!e) return
+    if (e.runInTerminal) Quickshell.execDetached(["omarchy-launch-tui"].concat((e.command || []).filter(w => !/^%[a-zA-Z]$/.test(String(w)))))
+    else Quickshell.execDetached(["uwsm-app", "--", "gtk-launch", String(e.id) + ".desktop"])
+    refreshSoon.restart()
+  }
+
   function activate(c, screenMonitor) {
     var w = coreWindows.item
     if (!w) return
@@ -219,8 +260,9 @@ Item {
     var mon = root.monitors.find(m => m.id === c.monitor)
     var screen = minimized || !mon ? on : mon.name   // (a minimized one comes back onto this screen)
     if (minimized && coreWindows.item) coreWindows.item.goTo(c, null, null)
-    Quickshell.execDetached(["bash", "-c", (minimized ? "sleep 0.25; " : "") + 'omarchy-shell -q omext.zones quickOver "$0" "$1" "$2" "$3" "$4"',
-                             c.address, screen, on, String(Math.round(x)), String(Math.round(y))])
+    // (With what the map's Pin line would do for this window's app.)
+    Quickshell.execDetached(["bash", "-c", (minimized ? "sleep 0.25; " : "") + 'omarchy-shell -q omext.zones quickPin "$0" "$1" "$2" "$3" "$4" "$5"',
+                             c.address, screen, on, String(Math.round(x)), String(Math.round(y)), root.isPinnedKey(root.pinKeyOf(c)) ? "unpin" : "pin"])
     root.zoneScreen = on
     zoneGone.restart()
     refreshSoon.restart()
@@ -317,6 +359,7 @@ Item {
     // Every window on a workspace out of sight, onto the focused screen's.
     function gather(): void { root.gather(null) }
     function keys(): void { root.byKeyboard() }
+    function pin(address: string): void { root.togglePin(address) }   // a window's app, pinned or unpinned (the zone map's line)
     // Start's menu is open over this screen's taskbar ("" : closed).
     function hold(screen: string): void { root.heldScreen = screen }
     // Up on the screen with the focus, until the pointer has been and gone.

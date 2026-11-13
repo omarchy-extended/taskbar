@@ -31,7 +31,11 @@ PanelWindow {
   readonly property bool startHere: !!taskbar && taskbar.startHere
   readonly property bool held: !!taskbar && !!screen && taskbar.heldScreen === screen.name
   onHeldChanged: if (!held) hideTimer.restart()
-  readonly property bool anything: startHere || current.length + others.length + minimized.length + dockGroups.length > 0
+  // The pinned apps (each with its windows), and the windows in front that
+  // aren't a pinned app's: those have their place after the pins.
+  readonly property var pinned: taskbar ? taskbar.pinned : []
+  readonly property var currentRest: taskbar ? current.filter(c => !taskbar.isPinnedKey(taskbar.pinKeyOf(c))) : current
+  readonly property bool anything: startHere || pinned.length + current.length + others.length + minimized.length + dockGroups.length > 0
 
   readonly property bool shown: !!taskbar && anything && !fullscreen
   property bool revealed: false
@@ -40,7 +44,7 @@ PanelWindow {
   // (Up too while omext arrange's zone map, opened from here, is open.)
   readonly property bool zoning: !!taskbar && taskbar.zoneScreen !== "" && taskbar.zoneScreen === screen.name
   onZoningChanged: if (!zoning) hideTimer.restart()
-  readonly property bool up: shown && (revealed || openKey !== "" || held || zoning || kbOn)
+  readonly property bool up: shown && (revealed || openKey !== "" || held || zoning || kbOn || menuFor !== null)
 
   readonly property int iconSize: Math.round(22 * Style.fontScale)
   readonly property int slot: iconSize + Style.space(12)
@@ -53,7 +57,7 @@ PanelWindow {
   // own width would depend on the answer).
   readonly property int flatMax: 5
   readonly property bool flatOthers: {
-    var s = win.slot, w = (win.current.length + win.minimized.length + (win.startHere ? 1.5 : 0)) * s + 3 * Style.space(11) + Style.space(10)
+    var s = win.slot, w = (win.pinned.length + win.current.length + win.minimized.length + (win.startHere ? 1.5 : 0)) * s + 3 * Style.space(11) + Style.space(10)
     for (var g of win.others) w += g.windows.length <= win.flatMax ? g.windows.length * s + Style.space(14) : s * 2.5
     w += win.dockGroups.length * (s + Style.space(6))
     if (win.others.length > 0) w += s  // the gather button
@@ -89,7 +93,7 @@ PanelWindow {
     var top = Math.min(p.y, body.y)   // clear of the bar, and of an open list
     return win.taskbar.zoneMenu(c, win.screen.name, win.screen.x + p.x, win.screen.y + win.screen.height - win.height + top)
   }
-  function done() { win.openKey = ""; win.revealed = false; win.tipFor = null; win.kbOn = false; win.kbItem = null; win.kbRowAt = -1 }
+  function done() { win.menuFor = null; win.openKey = ""; win.revealed = false; win.tipFor = null; win.kbOn = false; win.kbItem = null; win.kbRowAt = -1 }
 
   // --- by keyboard ---------------------------------------------------------------
   // The taskbar's key (if one is set: Setup > Omarchy Extended) brings it up with
@@ -201,6 +205,7 @@ PanelWindow {
     Region { item: win.shown && !win.up ? edge : null }
     Region { item: win.shown && win.up ? hold : null }
     Region { item: list.visible ? list : null }
+    Region { item: pinMenu.visible ? pinMenu : null }
     Region { item: win.up && win.startHere ? startCircle : null }
   }
 
@@ -353,16 +358,40 @@ PanelWindow {
           }
         }
       }
-      Divider { visible: win.startHere && win.current.length + win.minimized.length + win.others.length + win.dockGroups.length > 0 }
+      Divider { visible: win.startHere && win.pinned.length + win.current.length + win.minimized.length + win.others.length + win.dockGroups.length > 0 }
+
+      // The pinned apps, in their order: an app's windows in front stand in its
+      // place; with none there, its own icon (a click goes to its window
+      // elsewhere, or starts it).
+      Repeater {
+        model: win.pinned
+        Row {
+          id: pinSlot
+          required property var modelData
+          readonly property var here: win.current.filter(c => win.taskbar.pinKeyOf(c) === modelData.key)
+          Repeater {
+            model: pinSlot.here
+            TaskIcon {
+              required property var modelData
+              client: modelData
+            }
+          }
+          PinIcon {
+            visible: pinSlot.here.length === 0
+            pin: pinSlot.modelData
+          }
+        }
+      }
+      Divider { visible: win.pinned.length > 0 && win.currentRest.length > 0 }
 
       // The workspaces in front of you: a little room between one and the next.
       Repeater {
-        model: win.current
+        model: win.currentRest
         TaskIcon {
           required property var modelData
           required property int index
           client: modelData
-          leftRoom: index > 0 && win.current[index - 1].workspace.id !== modelData.workspace.id ? Style.space(8) : 0
+          leftRoom: index > 0 && win.currentRest[index - 1].workspace.id !== modelData.workspace.id ? Style.space(8) : 0
         }
       }
 
@@ -489,7 +518,7 @@ PanelWindow {
   property Item tipFor: null
   Rectangle {
     id: tip
-    visible: win.up && win.openKey === "" && win.tipFor !== null
+    visible: win.up && win.openKey === "" && win.tipFor !== null && win.menuFor === null
     readonly property string what: win.tipFor ? win.tipFor.tipText : ""
     width: Math.min(Style.space(420), tipText.implicitWidth + Style.space(18))
     height: tipText.implicitHeight + Style.space(10)
@@ -512,6 +541,57 @@ PanelWindow {
       color: win.text
       font.family: Style.font.family
       font.pixelSize: Style.font.bodySmall
+    }
+  }
+
+  // --- pin or unpin, over an icon ---------------------------------------------------
+  // (A right click on a pinned app's own icon; on a window's icon too, where
+  // omext arrange's zone map, which has this line, isn't there.)
+  property Item menuFor: null
+  property string menuKey: ""
+  function pinMenuAt(item, key) {
+    if (win.menuFor === item) { win.menuFor = null; return }
+    win.menuKey = key
+    win.menuFor = item
+    menuGone.restart()
+  }
+  Timer {  // it goes once the pointer has left both it and the bar
+    id: menuGone
+    interval: 900
+    repeat: true
+    running: win.menuFor !== null
+    onTriggered: if (!menuHover.hovered && !bodyHover.hovered) win.menuFor = null
+  }
+  Rectangle {
+    id: pinMenu
+    visible: win.up && win.menuFor !== null
+    readonly property bool isPinned: !!win.taskbar && win.taskbar.isPinnedKey(win.menuKey)
+    width: pinMenuText.implicitWidth + Style.space(26)
+    height: pinMenuText.implicitHeight + Style.space(14)
+    radius: Style.space(8)
+    color: pinMenuHit.containsMouse ? Qt.tint(Commons.Color.popups.background, Commons.Util.alpha(win.accent, 0.3)) : Commons.Util.alpha(Commons.Color.popups.background, 0.97)
+    border.color: Commons.Util.alpha(win.accent, 0.5)
+    x: {
+      if (!win.menuFor) return 0
+      var c = win.menuFor.mapToItem(win.contentItem, win.menuFor.width / 2, 0).x
+      return Math.max(win.gap, Math.min(win.width - width - win.gap, c - width / 2))
+    }
+    y: body.y - height - Style.space(6)
+    HoverHandler { id: menuHover }
+    Text {
+      id: pinMenuText
+      anchors.centerIn: parent
+      text: pinMenu.isPinned ? "\u{F0404}  Unpin from taskbar" : "\u{F0403}  Pin to taskbar"
+      color: win.text
+      font.family: Style.font.menuFamily || Style.font.family
+      font.pixelSize: Style.font.bodySmall
+    }
+    MouseArea {
+      id: pinMenuHit
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: { var k = win.menuKey; win.menuFor = null; win.taskbar.togglePinKey(k) }
     }
   }
 
@@ -626,12 +706,14 @@ PanelWindow {
   component AppIcon: Item {
     id: ai
     property var client: null
+    property string iconName: ""   // with no window: the app's icon by its name
+    property string letter: ""     // ... and what stands in for a missing one
     property int size: win.iconSize
     width: size; height: size
     Image {
       id: img
       anchors.fill: parent
-      source: ai.client ? win.taskbar.iconOf(ai.client) : ""
+      source: ai.client ? win.taskbar.iconOf(ai.client) : ai.iconName ? win.taskbar.iconSource(ai.iconName) : ""
       sourceSize: Qt.size(ai.size * 2, ai.size * 2)
       fillMode: Image.PreserveAspectFit
       smooth: true
@@ -644,11 +726,65 @@ PanelWindow {
       color: Commons.Util.alpha(win.accent, 0.25)
       Text {
         anchors.centerIn: parent
-        text: ai.client ? win.taskbar.appName(ai.client).charAt(0).toUpperCase() : ""
+        text: ai.client ? win.taskbar.appName(ai.client).charAt(0).toUpperCase() : ai.letter.charAt(0).toUpperCase()
         color: win.text
         font.family: Style.font.family
         font.pixelSize: Math.round(ai.size * 0.55)
         font.bold: true
+      }
+    }
+  }
+
+  // A pinned app with no window in front: click to go to its window elsewhere,
+  // or to start it; right-click to unpin it.
+  component PinIcon: Item {
+    id: pi
+    property var pin: null
+    readonly property bool running: !!pin && pin.windows.length > 0
+    readonly property string tipText: pin ? pin.name + (running ? "" : "  ·  not running") : ""
+    readonly property bool kbStop: true
+    readonly property bool kbChosen: win.kbItem === pi
+    function kbActivate() { var p = pi.pin, bar = win.taskbar, m = win.monitor; bar.startAside(); win.done(); bar.openPin(p, m) }
+    width: win.slot
+    height: win.slot
+
+    Rectangle {
+      x: 2; y: 2
+      width: win.slot - 4; height: win.slot - 4
+      radius: Style.space(9)
+      color: pinHit.containsMouse || pi.kbChosen ? Commons.Util.alpha(win.text, 0.12) : "transparent"
+      border.width: pi.kbChosen ? 1 : 0
+      border.color: win.accent
+      Behavior on color { ColorAnimation { duration: 120 } }
+    }
+    AppIcon {
+      x: (win.slot - width) / 2
+      y: (win.slot - height) / 2 - 1
+      iconName: pi.pin ? pi.pin.icon : ""
+      letter: pi.pin ? pi.pin.name : ""
+      opacity: pi.running ? 0.75 : 0.5
+      scale: pinHit.pressed ? 0.9 : pinHit.containsMouse ? 1.12 : 1
+      Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+    }
+    Rectangle {  // running somewhere else: a small mark
+      visible: pi.running
+      width: Style.space(4); height: 3; radius: 1.5
+      x: (win.slot - width) / 2
+      y: win.slot - 4
+      color: win.accent
+      opacity: 0.45
+    }
+    MouseArea {
+      id: pinHit
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      acceptedButtons: Qt.LeftButton | Qt.RightButton
+      onContainsMouseChanged: if (containsMouse) win.tipFor = pi; else if (win.tipFor === pi) win.tipFor = null
+      onClicked: function(mouse) {
+        win.tipFor = null
+        if (mouse.button === Qt.RightButton) { win.pinMenuAt(pi, pi.pin.key); return }
+        pi.kbActivate()
       }
     }
   }
@@ -704,7 +840,11 @@ PanelWindow {
       onClicked: function(mouse) {
         win.taskbar.startAside()
         if (mouse.button === Qt.MiddleButton) { win.taskbar.closeWindow(ti.client); return }
-        if (mouse.button === Qt.RightButton) { win.tipFor = null; win.zoneMenuAt(ti.client, ti); return }
+        if (mouse.button === Qt.RightButton) {  // the zone map (with its Pin line), or with no zones: the pin menu
+          win.tipFor = null
+          if (!win.zoneMenuAt(ti.client, ti)) win.pinMenuAt(ti, win.taskbar.pinKeyOf(ti.client))
+          return
+        }
         win.tipFor = null
         win.taskbar.activate(ti.client, win.monitor)
       }
