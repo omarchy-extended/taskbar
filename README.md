@@ -3,9 +3,10 @@
 Part of [**omarchy-extended**](https://github.com/omarchy-extended): addons for [Omarchy](https://omarchy.org).
 
 A small taskbar at the bottom of every screen that keeps out of the way. It
-waits below the edge; move the pointer down to it, anywhere along it, and it
-comes up, with a soft shade fading up from the edge behind it. Move up off the
-bar and it goes down again. Every open window is on it, or one
+waits below the edge; move the pointer down to where it is, at the middle of
+the edge, and it comes up, with a soft shade fading up from the edge behind it.
+Move off the bar and it goes down again; the rest of the edge is left to the
+windows. Every open window is on it, or one
 click away.
 
 ![The taskbar: Start, the windows in front of you, a minimized one, a small workspace on the bar, and a larger one's list](screenshots/taskbar-list.webp)

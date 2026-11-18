@@ -259,13 +259,14 @@ PanelWindow {
   }
   Timer { id: shownByCall; interval: 2500; onTriggered: hideTimer.restart() }
 
-  // The thin strip along the bottom edge that brings it up: the whole edge,
-  // from corner to corner, so it's found without aiming.
+  // The thin strip along the bottom edge that brings it up: under the bar, and
+  // a little wider, so it's found without aiming. The rest of the edge is the
+  // windows' own.
   Item {
     id: edge
-    width: win.width
+    width: Math.min(win.width, body.width + Style.space(160))
     height: 2
-    x: 0
+    x: Math.round((win.width - width) / 2)
     y: win.height - height
     HoverHandler {
       id: edgeHover
@@ -273,13 +274,14 @@ PanelWindow {
     }
   }
 
-  // What holds the bar up: the pointer anywhere across the bottom of the
-  // screen, from the edge to just over the bar (no higher: moving up off the
-  // bar puts it away).
+  // What holds the bar up: the pointer at the bar's place, as wide as the
+  // strip and from the edge to just over the bar (no higher or further out:
+  // moving off the bar puts it away).
   Item {
     id: hold
     visible: win.up   // (down, it would lie over the edge strip and take its hover)
-    width: win.width
+    width: edge.width
+    x: edge.x
     height: body.height + win.gap + Style.space(6)
     y: win.height - height
     HoverHandler {
