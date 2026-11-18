@@ -60,6 +60,11 @@ in front; a click on one goes there. With one window, the click goes straight
 to it. A pinned app's icon does the same when the app has several windows
 elsewhere.
 
+A dialog (a file chooser, "Save as") has no icon of its own: it is its
+window's. With [omext core](https://github.com/omarchy-extended/core) it comes
+in front of that window whenever you go to it, so the app's icon takes you to
+the dialog.
+
 A minimized window has a dimmed icon of its own after the others, unless its
 app already has an icon: a pinned app's stays at the pin, which gets a small
 "–" in its corner when every window it has is minimized (a click brings it

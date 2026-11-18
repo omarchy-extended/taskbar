@@ -57,7 +57,19 @@ Item {
   }
   readonly property bool manyScreens: root.monitors.length > 1
 
-  function windowOk(c) { return c && c.address && c.mapped !== false }
+  // A dialog (a file chooser, "Save as") is its window's: omext core tags it
+  // omext-dialog-of-<that window's address> and keeps it in front of the
+  // window, so it has no icon of its own here while that window is open.
+  readonly property var open: {
+    var out = {}
+    for (var c of root.clients) if (c && c.address && c.mapped !== false) out[c.address] = true
+    return out
+  }
+  function dialogOf(c) {
+    for (var t of (c.tags || [])) if (t.indexOf("omext-dialog-of-") === 0) return t.slice(16).replace(/\*$/, "")
+    return ""
+  }
+  function windowOk(c) { return c && c.address && c.mapped !== false && !root.open[root.dialogOf(c)] }
   function byPlace(a, b) { return (a.at[0] - b.at[0]) || (a.at[1] - b.at[1]) }
 
   // The windows in front of you: by screen, left to right, then by place.
